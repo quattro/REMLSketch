@@ -14,17 +14,13 @@ def logdet(X):
         return ld * -1
 
 
-def dots(terms):
-    return reduce(lambda x, y: x.dot(y), terms)
-
-
 def get_terms(X, V):
     if X is not None:
-        Vinv = la.pinv(V)
-        XtVinvX = dots([X.T, Vinv, X])
-        P = Vinv - dots([Vinv, X, la.pinv(XtVinvX), X.T, Vinv])
+        Vinv = la.inv(V)
+        XtVinvX = la.multi_dot([X.T, Vinv, X])
+        P = Vinv - la.multi_dot([Vinv, X, la.inv(XtVinvX), X.T, Vinv])
     else:
-        Vinv = la.pinv(V)
+        Vinv = la.inv(V)
         P = Vinv
         XtVinvX = None
 
@@ -34,9 +30,9 @@ def get_terms(X, V):
 # the log likelihood equation for the linear mixed model
 def ll(y, X, P, V, XtVinvX):
     if X is not None:
-        return -0.5 * (logdet(XtVinvX) + logdet(V) + dots([y.T, P, y]))
+        return -0.5 * (logdet(XtVinvX) + logdet(V) + la.multi_dot([y.T, P, y]))
     else:
-        return -0.5 * (logdet(V) + dots([y.T, P, y]))
+        return -0.5 * (logdet(V) + la.multi_dot([y.T, P, y]))
 
 
 def theory_se(A, P, Var):
@@ -60,10 +56,10 @@ def delta_se(A, P, Var):
     # Calculate matrix for standard errors (same as AI matrix but w/out y)
     for i in range(r):
         for j in range(r):
-            S[i, j] = np.trace(dots([P, A[i], P, A[j]]))
+            S[i, j] = np.trace(la.multi_dot([P, A[i], P, A[j]]))
 
     S = 0.5 * S
-    Sinv = la.pinv(S)
+    Sinv = la.inv(S)
     
     SE = np.zeros(r)
     xs = ["x{}".format(i) for i in range(r)]
@@ -74,7 +70,7 @@ def delta_se(A, P, Var):
         x = vars[i]
         exprs = [sympy.diff(vars[i] / sum(vars), x) for x in vars]
         grad = np.array([expr.evalf(subs=sub) for expr in exprs])
-        SE[i] = dots([grad.T, Sinv / float(N), grad])
+        SE[i] = la.multi_dot([grad.T, Sinv / float(N), grad])
 
     return [np.sqrt(SE), Sinv]
 
@@ -115,7 +111,7 @@ def emREML(A, y, Var, X=None, calc_se=True, bounded=False, max_iter=100, verbose
             vi2 = Var[i]
             vi4 = vi2**2
             Ai = A[i]
-            Var[i] = (vi4 * dots([y.T, P, Ai, P, y]) + np.trace(vi2 * np.eye(N) - vi4 * P.dot(Ai)) ) / N
+            Var[i] = (vi4 * la.multi_dot([y.T, P, Ai, P, y]) + np.trace(vi2 * np.eye(N) - vi4 * P.dot(Ai)) ) / N
         V = sum(A[i] * Var[i] for i in range(r))
 
         P, XtVinvX = get_terms(X, V)
@@ -136,7 +132,7 @@ def emREML(A, y, Var, X=None, calc_se=True, bounded=False, max_iter=100, verbose
     return final
 
 
-def aiREML(A, y, Var, X=None, calc_se=True, bounded=False, max_iter=100, verbose=False):
+def aiREML(A, y, Var, X=None, sketch=0, calc_se=True, bounded=False, max_iter=100, verbose=False):
     """ Average Information method for computing the REML estimate of variance components.
     A = List of variance components (A1, ..., Ak, R)
     y = phenotype
@@ -160,15 +156,19 @@ def aiREML(A, y, Var, X=None, calc_se=True, bounded=False, max_iter=100, verbose
     it = 0
 
     y_var = np.var(y, ddof=1)
+    Var /= sum(Var)
+
     Var = y_var * Var
 
+    """
     if X is None:
         X = np.c_[np.ones(N)]
     else:
         X = np.concatenate([X, np.c_[np.ones(N)]], axis=1)
+    """
 
     # Perform a single iteration of EM-based REML to initiate parameters
-    V = sum(A[i] * Var[i] for i in range(r))
+    V = np.sum(A[i] * Var[i] for i in range(r))
 
     P, XtVinvX = get_terms(X, V)
     logL = ll(y, X, P, V, XtVinvX)
@@ -177,39 +177,48 @@ def aiREML(A, y, Var, X=None, calc_se=True, bounded=False, max_iter=100, verbose
         vi2 = Var[i]
         vi4 = vi2**2
         Ai = A[i]
-        Var[i] = (vi4 * dots([y.T, P, Ai, P, y]) + np.trace(vi2 * np.eye(N) - vi4 * P.dot(Ai)) ) / float(N)
+        Var[i] = (vi4 * la.multi_dot([y.T, P, Ai, P, y]) + np.trace(vi2 * np.eye(N) - vi4 * P.dot(Ai)) ) / float(N)
 
     V = sum(A[i] * Var[i] for i in range(r))
 
     P, XtVinvX = get_terms(X, V)
     logL = ll(y, X, P, V, XtVinvX)
     if verbose:
-        print 'LogLike', 'V(G)', 'V(e)'
+        print 'LogLike', 'V(G)', 'V(e)', logL, Var[0], Var[1]
 
     # Iterate AI REML until convergence
+    I = np.eye(r)
+    Arry = np.concatenate(A, axis=0)
+    #import pdb; pdb.set_trace()
     while it < max_iter and ( math.fabs(l_dif) >= 10E-4 or (math.fabs(l_dif) < 10E-2 and l_dif < 0) ):
         it = it + 1
 
+        ytP = y.T.dot(P)
+        L = la.cholesky(P)
+        AI_sqrt = la.multi_dot([np.kron(I, ytP), Arry, L])
+
         # Average information matrix
-        for i in range(r):
-            for j in range(r):
-                AI[i, j] = dots([y.T, P, A[i], P, A[j], P, y])  
+        if sketch == 0:
+            AI = AI_sqrt.dot(AI_sqrt.T)
+        else:
+            S = np.random.normal(size=(N, sketch))
+            AI = la.multi_dot([AI_sqrt, S, S.T, AI_sqrt.T])
 
         AI = 0.5 * AI
 
         # Vector of first derivatives of log likelihood function
         for i in range(r):
             Ai = A[i]
-            s[i, 0] = np.trace(P.dot(Ai)) - dots([y.T, P, Ai, P, y ])
+            s[i, 0] = np.trace(P.dot(Ai)) - la.multi_dot([ytP, Ai, ytP.T ])
 
         s = -0.5 * s
 
         # New variance components from AI and likelihood
         if l_dif > 1:
             # can't we just do line search here?
-            Var_tmp = (Var + 0.316 * la.pinv(AI).dot(s).T)[0]
+            Var_tmp = (Var + 0.316 * la.inv(AI).dot(s).T)[0]
         else:
-            Var_tmp = (Var + la.pinv(AI).dot(s).T)[0]
+            Var_tmp = (Var + la.inv(AI).dot(s).T)[0]
 
         if bounded:
             constrain = np.zeros(r)
