@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 import argparse as ap
 import os
+import time
 import sys
 
 import numpy as np
@@ -39,14 +40,16 @@ def main(args):
     A = Z.dot(Z.T) / float(p)
 
     #res = reml.aiREML([A, np.eye(n)], y, np.array([0.5, 0.5]), X=X, verbose=True)
+    t0 = time.time()
     res = reml.aiREML([A, np.eye(n)], y, np.array([0.5, 0.5]), verbose=True)
-    h2g_hat = res[0][0] / sum(res[0])
-    print h2g, h2g_hat 
+    t1 = time.time() - t0
 
     #res = reml.aiREML([A, np.eye(n)], y, np.array([0.5, 0.5]), X=X, verbose=True, sketch=500)
+    t2 = time.time()
     res = reml.aiREML([A, np.eye(n)], y, np.array([0.5, 0.5]), verbose=True, sketch=500)
-    h2g_hat = res[0][0] / sum(res[0])
-    print h2g, h2g_hat 
+    t3 = time.time() - t2
+
+    print t1, t3
 
     return 0
 

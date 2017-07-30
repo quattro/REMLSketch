@@ -184,7 +184,8 @@ def aiREML(A, y, Var, X=None, sketch=0, calc_se=True, bounded=False, max_iter=10
     P, XtVinvX = get_terms(X, V)
     logL = ll(y, X, P, V, XtVinvX)
     if verbose:
-        print 'LogLike', 'V(G)', 'V(e)', logL, Var[0], Var[1]
+        print 'LogLike', 'V(G)', 'V(e)'
+        print logL, Var[0], Var[1]
 
     # Iterate AI REML until convergence
     I = np.eye(r)
@@ -194,15 +195,13 @@ def aiREML(A, y, Var, X=None, sketch=0, calc_se=True, bounded=False, max_iter=10
         it = it + 1
 
         ytP = y.T.dot(P)
-        L = la.cholesky(P)
-        AI_sqrt = la.multi_dot([np.kron(I, ytP), Arry, L])
-
         # Average information matrix
         if sketch == 0:
-            AI = AI_sqrt.dot(AI_sqrt.T)
+            AI = la.multi_dot([np.kron(I, ytP), Arry, P, Arry.T, np.kron(I, ytP).T])
         else:
+            L = la.cholesky(P)
             S = np.random.normal(size=(N, sketch))
-            AI = la.multi_dot([AI_sqrt, S, S.T, AI_sqrt.T])
+            AI = la.multi_dot([np.kron(I, ytP), Arry, L, S, S.T, L.T, Arry.T, np.kron(I, ytP).T])
 
         AI = 0.5 * AI
 
