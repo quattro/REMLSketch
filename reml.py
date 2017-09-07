@@ -5,6 +5,8 @@ import numpy as np
 import numpy.linalg as la
 import sympy
 
+from scipy.linalg import clarkson_woodruff_transform as cwt
+
 
 def logdet(X):
     sign, ld = la.slogdet(X)
@@ -190,7 +192,6 @@ def aiREML(A, y, Var, X=None, sketch=0, calc_se=True, bounded=False, max_iter=10
     # Iterate AI REML until convergence
     I = np.eye(r)
     Arry = np.concatenate(A, axis=0)
-    #import pdb; pdb.set_trace()
     while it < max_iter and ( math.fabs(l_dif) >= 10E-4 or (math.fabs(l_dif) < 10E-2 and l_dif < 0) ):
         it = it + 1
 
@@ -200,8 +201,11 @@ def aiREML(A, y, Var, X=None, sketch=0, calc_se=True, bounded=False, max_iter=10
             AI = la.multi_dot([np.kron(I, ytP), Arry, P, Arry.T, np.kron(I, ytP).T])
         else:
             L = la.cholesky(P)
-            S = np.random.normal(size=(N, sketch))
-            AI = la.multi_dot([np.kron(I, ytP), Arry, L, S, S.T, L.T, Arry.T, np.kron(I, ytP).T])
+            #S = np.random.normal(size=(N, sketch))
+            #AI = la.multi_dot([np.kron(I, ytP), Arry, L, S, S.T, L.T, Arry.T, np.kron(I, ytP).T])
+            PL = cwt(L.T, sketch).T
+            sub = la.multi_dot([np.kron(I, ytP), Arry, PL]) 
+            AI = sub.dot(sub.T)
 
         AI = 0.5 * AI
 
